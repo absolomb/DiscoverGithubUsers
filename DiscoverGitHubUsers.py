@@ -10,12 +10,18 @@ def print_banner():
  | | | | / __|/ __/ _ \ \ / / _ \ '__| | |  _| | __| '_ \| | | | '_ \  | | | / __|/ _ \ '__/ __|
  | |_| | \__ \ (_| (_) \ V /  __/ |    | |_| | | |_| | | | |_| | |_) | | |_| \__ \  __/ |  \__ \\
  |____/|_|___/\___\___/ \_/ \___|_|     \____|_|\__|_| |_|\__,_|_.__/   \___/|___/\___|_|  |___/
+ v0.2
  """
     print(banner)
 
 # find users based off the search keyword
 def find_keyword_users(g):
-    print("[*] Searching for users with keyword: " + keyword)
+    
+    print()
+    print("======================================================")
+    print("    Gathering Users with Keyword: " + keyword)
+    print("======================================================")
+    print()
     users=g.search_users(str(keyword))
     print("[+] Total users discovered with keyword '"+ keyword +"': " + str(users.totalCount))
     return users
@@ -24,107 +30,185 @@ def find_keyword_users(g):
 # usually not a ton of results here since this is generally private info
 def find_org_users(g, orgname):
     
+    print_header("Gathering Organizational Information")
+    
     if orgname is not None:
         print("[*] Getting organization with username: " + orgname)
+        
         try:
             org = g.get_organization(orgname)
+        
         except Exception as e:
             print("[-] No organization found with name: " + orgname)
             return None, None
 
     else:
         print("[*] Organization name not specified, getting organization username with keyword: " + keyword)
+        
         try:
             org = g.get_organization(keyword)
+        
         except Exception as e:
             print("[-] No organization discovered with keyword: " + keyword)
             return None, None
 
     if org:
         print("[+] Organization Discovered!")
+        print()
         print("    Name: " + org.name)
         print("    Login: " + org.login)
         print()
         users = org.get_public_members()
         print("[+] Total public users discovered in organization '"+ org.name +"': " + str(users.totalCount))
+
+        if users:
+            for user in users:
+                print("    " + user.login)
+
         return users, org
 
 # filter results from basic keyword search to reduce false positives
 def filter_users(users):
+
     filtered_users = []
     print("[*] Filtering users further to reduce false positives")
-    print()
+    
     try:
         for user in users:
+
             if user.company is not None and keyword.lower() in user.company.lower():
                 print("[+] " + user.login + " has " + keyword + " in company field!")
                 print("    Company: " + user.company)
+                print()
                 filtered_users.append(user)
                 continue
+            
             elif user.email is not None and domain.lower() in user.email.lower():
                 print("[+] " + user.login + " has " + domain + " in email field!")
                 print("    Email: " + user.email)
+                print()
                 filtered_users.append(user)
                 continue
+            
             elif user.blog is not None and domain.lower() in user.blog.lower():
                 print("[+] " + user.login + " has " + domain + " in blog field!")
                 print("    Blog: " + user.blog)
+                print()
                 filtered_users.append(user)
                 continue
+            
             elif user.bio is not None and keyword.lower() in user.bio.lower():
                 print("[+] " + user.login + " has " + keyword + " in bio field!")
                 bio = user.bio.replace('\r\n', '')
                 print("    Bio: " + bio)
+                print()
                 filtered_users.append(user)
                 continue
     # if an exception gets hit here, it's probably due to API limits without a token
     except Exception as e:
         print(e)
-
+    
+    print()
     print("[+] Total filtered users discovered: " + str(len(filtered_users)))
+    write_usernames(filtered_users, "filtered users", False)
     return filtered_users
 
 # prints repos for discovered organization
 def get_org_repos(org):
-    print()
-    print("[+] Listing organization repos")
+
+    print_header("Gathering Organization Repositories ")
+    print("[*] Listing organization repositories")
     print("[+] Username: " + org.login)
     repos = org.get_repos()
+    print("[*] Number of repositories: " + str(repos.totalCount))
+    print()
 
-    print("    Number of repositories: " + str(repos.totalCount))
     for repo in repos:
+        
         if giturls:
-            print("    " + repo.clone_url)
+            print("[+] " + repo.clone_url)
             output_repos.add(repo.clone_url)
         else:
-            print("    " + repo.html_url)
+            print("[+] " + repo.html_url)
             output_repos.add(repo.html_url)
+        if repo.fork == False:
+            
+            try:
+                contribs = repo.get_contributors()
+                if contribs.totalCount > 0:
+                    print("[*] Non-forked repository, listing " + str(contribs.totalCount) +" contributors:")
+                    print()
+                    for contrib in contribs:
+                        print("      " + contrib.login)
+                        contributors.add(contrib)
+                    print()
+
+            except Exception as e:
+                print("[!] " + str(e))
+                continue
+            
     print()
+    print("[+] Total organizational contributors discovered: " + str(len(contributors)))
+    write_usernames(contributors, "contributors", False)
 
 # prints repos for all users discovered
 def get_user_repos(users):
+    
     for user in users:
         print()
         print("[+] Username: " + user.login)
         repos = user.get_repos()
-        print("    Number of repositories: " + str(repos.totalCount))
-        for repo in repos:
-            if giturls:
-                print("    " + repo.clone_url)
-                output_repos.add(repo.clone_url)
-            else:
-                print("    " + repo.html_url)
-                output_repos.add(repo.html_url)
+        print("[*] Number of repositories: " + str(repos.totalCount))
+        
+        if repos.totalCount < 50:
+            print()
+            for repo in repos:
+                if giturls:
+                    print("    " + repo.clone_url)
+                    output_repos.add(repo.clone_url)
+                else:
+                    print("    " + repo.html_url)
+                    output_repos.add(repo.html_url)
+        else:
+            for repo in repos:
+                if giturls:
+                    output_repos.add(repo.clone_url)
+                else:
+                    output_repos.add(repo.html_url)
 
 
 def write_output(repos):
-    print("\n[*] Writing repos to file")
+    
+    filename = "repos.txt"
+    print("\n[*] Writing " + str(len(repos)) + " repos to " + filename)
     # convert to a list so we can sort the output
     repo_list = list(repos)
     repo_list.sort()
-    with open('repos.txt', 'a') as repo_file:
+    with open(filename, 'a') as repo_file:
         for repo in repo_list:
             repo_file.write("%s\n" % repo)
+
+def write_usernames(users, name, flag):
+    
+    filename = name + ".txt"
+    if flag:
+        print("\n[*] Writing " + str(users.totalCount) + " " + name + " to " + filename)
+        print()
+    else:
+        print("\n[*] Writing " + str(len(users)) + " " + name + " to " + filename)
+        print()
+
+    with open(filename, 'a') as user_file:
+        for user in users:
+            user_file.write("%s\n" % user.login)
+
+def print_header(header_string):
+
+    print()
+    print("======================================================")
+    print("    " + header_string)
+    print("======================================================")
+    print()
 
 def main():
 
@@ -146,15 +230,18 @@ def main():
     global keyword
     global output_repos
     global giturls
+    global contributors
 
     # using a set here to prevent duplicate repo values
     output_repos = set()
+    contributors = set()
     token = args.t
     domain = args.d 
     keyword = args.k
     org = args.o
     nofilter = args.no_filter
     giturls = args.g
+
 
     if not domain or not keyword:
         print("[!] You must specify both a keyword with -k and a domain with -d")
@@ -171,23 +258,27 @@ def main():
 
     org_users, org_object = find_org_users(g, org)
 
-    if org_users is not None:
-        for user in org_users:
-            print("    " + user.login)
-
     if org_object:
         get_org_repos(org_object)
 
-    if org_users:
+    if org_users.totalCount > 0:
+        print_header("Gathering Organization Member Repositories")
         get_user_repos(org_users)
 
-    search_users = find_keyword_users(g)
+    if len(contributors) > 0:
+        print_header("Gathering Contributor Repositories")
+        get_user_repos(contributors)
 
+    search_users = find_keyword_users(g)
+    
     if nofilter:
+        write_usernames(search_users, "non-filtered users", True)
         print("[*] Gathering results without filtering, this could result in lots of noise and false positives!")
+        print_header("Gathering Non-filtered User Repositories")
         get_user_repos(search_users)
     else:
         filtered = filter_users(search_users)
+        print_header("Gathering Filtered User Repositories")
         get_user_repos(filtered)
     
 
